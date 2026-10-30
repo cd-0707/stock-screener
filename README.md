@@ -22,3 +22,10 @@ En cours de développement
 - [ ] Moteur de scoring
 - [ ] Optimisation de portefeuille et backtest
 - [ ] Interface Streamlit
+
+## Objectifs 
+Un outil qui classe des actions selon le profil d’un investisseur (risque, horizon, secteurs, budget) et propose un portefeuille dont les performances passées sont évaluées par backtest.
+
+## Périmètre 
+^FCHI (CAC 40) et ^GSPC (S&P 500)
++infos sur docs/cahier_des_charges.md 
