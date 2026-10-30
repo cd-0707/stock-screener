@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Données (trop lourdes, régénérables par le script de collecte)
+data/*
+!data/.gitkeep
+
+# Divers
+.ipynb_checkpoints/
+.DS_Store
