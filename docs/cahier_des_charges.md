@@ -48,3 +48,4 @@ pas de conseil personnalisé : outil pédagogique
 - Biais de survie (univers composé des actions actuelles)
 - Données gratuites yfinance, parfois incomplètes
 - Fondamentaux non historisés
+- simplification du taux à 0%.
