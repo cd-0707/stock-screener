@@ -226,3 +226,8 @@ data/*
 # Divers
 .ipynb_checkpoints/
 .DS_Store
+
+data/*
+!data/.gitkeep
+!data/snapshot.db
+!data/backtest_*_courbes.csv

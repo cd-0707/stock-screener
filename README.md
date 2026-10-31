@@ -45,3 +45,7 @@ Exécution au cours de clôture du jour du signal.
 Frais simplifiés : pas d’écart acheteur/vendeur.
 Fondamentaux exclus du backtest (PER, dividende non historisés).
 Une seule période : un backtest n’est pas une preuve.
+
+
+## 
+Sur 2018-2026, avec des rééquilibrages trimestriels et 0,1 % de frais, le profil prudent réduit la pire baisse (−27 % contre −33 % pour un portefeuille équipondéré de l’univers) mais n’améliore pas le rendement (15,1 % contre 17,0 % par an). Aucun profil ne bat le portefeuille équipondéré sur le ratio de Sharpe. Ces résultats portent sur une seule période et un univers soumis au biais de survie : ils ne permettent pas de conclure à l’efficacité du scoring.
