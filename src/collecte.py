@@ -12,6 +12,8 @@ Choix de conception :
   incohérents entre eux.
 - Les prix sont stockés bruts (clôture) ET ajustés (clôture ajustée). Les
   calculs de rendement utiliseront la clôture ajustée.
+- La journée en cours est exclue (séance non terminée) : relance la collecte le
+  lendemain pour obtenir la clôture d'hier.
 - Les valeurs manquantes ne sont pas « remplies » ici : la base garde les
   données réelles, le traitement (alignement des calendriers Paris/New York)
   se fera au moment de l'analyse.
@@ -28,7 +30,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from src.univers import ACTIONS, INDICES
+from src.univers import ACTIONS, DEBUT_VALIDE, INDICES
 
 RACINE = Path(__file__).resolve().parent.parent
 CHEMIN_BASE = RACINE / "data" / "stock_screener.db"
@@ -125,6 +127,10 @@ def telecharger_prix(ticker, annees):
     df = df.dropna(subset=["cloture", "cloture_ajustee"])
     df = df[(df["cloture"] > 0) & (df["cloture_ajustee"] > 0)]
     df["volume"] = df["volume"].fillna(0)
+
+    # La séance du jour n'est peut-être pas terminée : son dernier cours serait un cours
+    # en cours de journée, pas une clôture. On ne garde que les journées terminées.
+    df = df[df.index < pd.Timestamp.today().normalize()]
     return df.sort_index()
 
 
@@ -214,6 +220,14 @@ def mettre_a_jour(annees=10, pause=0.5):
             if prix is None:
                 raise ValueError("aucune donnée de prix reçue")
 
+            # Historique tronqué (fusion, scission...) : voir DEBUT_VALIDE dans univers.py
+            debut_valide = DEBUT_VALIDE.get(ticker)
+            if debut_valide:
+                prix = prix[prix.index >= pd.Timestamp(debut_valide)]
+                conn.execute("DELETE FROM prix WHERE ticker = ? AND date < ?", (ticker, debut_valide))
+            if prix.empty:
+                raise ValueError("aucune donnée de prix exploitable")
+
             # Les prix sont indispensables ; les fondamentaux sont facultatifs
             infos = {"nom": INDICES.get(ticker, ticker)}
             if not est_indice:
@@ -300,4 +314,3 @@ if __name__ == "__main__":
         verifier()
     else:
         mettre_a_jour(annees=args.annees)
-    

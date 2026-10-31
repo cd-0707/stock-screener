@@ -49,3 +49,9 @@ Une seule période : un backtest n’est pas une preuve.
 
 ## 
 Sur 2018-2026, avec des rééquilibrages trimestriels et 0,1 % de frais, le profil prudent réduit la pire baisse (−27 % contre −33 % pour un portefeuille équipondéré de l’univers) mais n’améliore pas le rendement (15,1 % contre 17,0 % par an). Aucun profil ne bat le portefeuille équipondéré sur le ratio de Sharpe. Ces résultats portent sur une seule période et un univers soumis au biais de survie : ils ne permettent pas de conclure à l’efficacité du scoring.
+
+
+##
+Sur 2018-2026 (rééquilibrage trimestriel, 0,1 % de frais), aucun des trois profils ne dépasse le portefeuille équipondéré de l’univers en rendement (10,0 %, 13,5 % et 15,9 % par an contre 16,8 %) ni en ratio de Sharpe (0,73, 0,81 et 0,79 contre 1,02). Les profils se différencient bien sur la volatilité (13,7 %, 16,7 %, 20,2 %), mais le profil prudent ne réduit pas la pire baisse (−32,4 % contre −33,8 %). Une anomalie de données liée à la fusion de Stellantis gonflait le rendement du profil prudent de 5 points par an avant sa détection. Ces résultats portent sur une seule période et un univers soumis au biais de survie : ils ne permettent pas de conclure à l’efficacité du scoring.
+
+Contrôle qualité : toutes les variations quotidiennes supérieures à 20 % ont été examinées. Une anomalie liée à la fusion PSA/FCA (Stellantis) a été détectée, expliquée et corrigée.

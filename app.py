@@ -82,6 +82,7 @@ profil_affiche = st.sidebar.radio(
 horizon_affiche = st.sidebar.selectbox("Horizon de placement", list(HORIZONS_AFFICHES), index=1)
 secteurs = st.sidebar.multiselect(
     "Secteurs d'intérêt", sorted(univers["secteur"].dropna().unique()),
+    placeholder="Tous les secteurs",
     help="Laisser vide pour considérer tous les secteurs.",
 )
 
@@ -140,7 +141,12 @@ if classement.empty:
              "Essaie d'élargir la fourchette de prix ou de retirer un secteur.")
     st.stop()
 if len(classement) < nb_actions:
-    st.info(f"Seulement {len(classement)} actions respectent ces critères (au lieu de {nb_actions}).")
+    n = len(classement)
+    st.info(
+        f"Seulement {n} action{'s' if n > 1 else ''} {'respectent' if n > 1 else 'respecte'} ces critères "
+        f"(au lieu de {nb_actions}). Un portefeuille aussi concentré est très risqué : "
+        "ses indicateurs ci-dessous sont ceux de ces seules actions."
+    )
 
 stats = statistiques_portefeuille(poids, rendements)
 colonnes = st.columns(4)
@@ -159,31 +165,39 @@ onglet_portefeuille, onglet_detail, onglet_carte, onglet_backtest, onglet_method
 
 # --- Portefeuille -----------------------------------------------------------
 with onglet_portefeuille:
-    gauche, droite = st.columns([3, 2])
+    prix_avec_devise = (classement["dernier_prix"].map("{:,.2f}".format) + " "
+                        + univers["devise"].reindex(classement.index).fillna(""))
+    affichage = pd.DataFrame({
+        "Société": classement["nom"],
+        "Poids (%)": classement["poids"] * 100,
+        "Score": classement["score"],
+        "Secteur": classement["secteur"],
+        "Famille": classement["famille"],
+        "Prix": prix_avec_devise,
+    })
+    st.dataframe(
+        affichage,
+        column_config={
+            "Poids (%)": st.column_config.ProgressColumn(format="%.1f", min_value=0, max_value=100),
+            "Score": st.column_config.NumberColumn(format="%.1f", help="De 0 à 100"),
+        },
+    )
+    st.caption("Un poids de 0 signifie que l'optimisation a écarté l'action malgré son bon score. "
+               "Les prix sont dans la devise de cotation de chaque action.")
+
+    gauche, droite = st.columns(2)
     with gauche:
-        affichage = pd.DataFrame({
-            "Société": classement["nom"],
-            "Secteur": classement["secteur"],
-            "Famille": classement["famille"],
-            "Prix": classement["dernier_prix"],
-            "Devise": univers["devise"].reindex(classement.index),
-            "Score": classement["score"],
-            "Poids (%)": classement["poids"] * 100,
-        })
-        st.dataframe(
-            affichage,
-            column_config={
-                "Prix": st.column_config.NumberColumn(format="%.2f"),
-                "Score": st.column_config.NumberColumn(format="%.1f", help="De 0 à 100"),
-                "Poids (%)": st.column_config.ProgressColumn(format="%.1f", min_value=0, max_value=100),
-            },
-        )
-        st.caption("Un poids de 0 signifie que l'optimisation a écarté l'action malgré son bon score.")
-    with droite:
         par_secteur = (classement.assign(secteur=classement["secteur"].fillna("Inconnu"))
                        .groupby("secteur")["poids"].sum().reset_index())
         figure = px.pie(par_secteur, names="secteur", values="poids", hole=0.45,
                         title="Répartition par secteur")
+        st.plotly_chart(figure)
+    with droite:
+        par_action = classement[classement["poids"] > 0].reset_index()
+        figure = px.bar(par_action, x="poids", y="ticker", orientation="h",
+                        title="Poids de chaque action")
+        figure.update_yaxes(autorange="reversed", title="")
+        figure.update_xaxes(tickformat=".0%", title="")
         st.plotly_chart(figure)
 
 # --- Détail du score --------------------------------------------------------
