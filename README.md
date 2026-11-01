@@ -10,7 +10,6 @@ A personalised stock recommendation system: given an investor's profile (risk ap
 ![Portfolio tab](docs/img/portfolio.png)
 ![Why these stocks?](docs/img/why.png)
 ![Backtest tab](docs/img/backtest.png)
-<img src="docs/img/portfolio.png" alt="Portfolio tab" width="700">
 
 ## Contents
 
