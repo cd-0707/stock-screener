@@ -1,12 +1,11 @@
 # Stock Screener
 
-A personalised stock recommendation system: given an investor's profile (risk appetite, horizon, sectors, price range), it ranks stocks, explains each choice, builds a portfolio and **backtests the method without look-ahead bias**.
+A personalised stock recommendation system: given an investor's profile (risk appetite, horizon, sectors, price range), it ranks stocks, explains each choice, builds a portfolio and **backtests the method without look-ahead bias**. An extension forecasts stock volatility, following the research literature, and tests whether it helps.
 
 > ⚠️ **Educational project. This is not investment advice.** Rankings describe past behaviour of a small set of stocks; they do not predict the future and can lose money.
 
 **[Live demo](https://stock-screener-gxdqcb3zs8omhuhqsmjz5c.streamlit.app/)** · Python · pandas · scikit-learn · SQLite · Streamlit
 
--->
 ![Portfolio tab](docs/img/portfolio.png)
 ![Why these stocks?](docs/img/why.png)
 ![Backtest tab](docs/img/backtest.png)
@@ -17,12 +16,14 @@ A personalised stock recommendation system: given an investor's profile (risk ap
 2. [Main findings](#main-findings)
 3. [How it works](#how-it-works)
 4. [Backtest methodology and results](#backtest-methodology-and-results)
-5. [Data quality](#data-quality)
-6. [Limitations](#limitations)
-7. [Project structure](#project-structure)
-8. [Getting started](#getting-started)
-9. [Possible next steps](#possible-next-steps)
-10. [Data and licence](#data-and-licence)
+5. [Volatility forecasting](#volatility-forecasting)
+6. [Data quality](#data-quality)
+7. [Limitations](#limitations)
+8. [Project structure](#project-structure)
+9. [Getting started](#getting-started)
+10. [Possible next steps](#possible-next-steps)
+11. [References](#references)
+12. [Data and licence](#data-and-licence)
 
 ## What it does
 
@@ -32,11 +33,12 @@ A personalised stock recommendation system: given an investor's profile (risk ap
 - Groups stocks into four behavioural families with K-means clustering.
 - Builds a portfolio with long-only, capped weights (Markowitz optimisation).
 - Backtests the whole process quarter by quarter, using only the data that was available at each date, and compares it with simple benchmarks.
-- Serves everything in a Streamlit app with a plain-language explanation for each recommended stock.
+- Forecasts one-month-ahead volatility with a HAR model and machine-learning extensions, with a strictly chronological out-of-sample evaluation.
+- Serves the recommendations in a Streamlit app with a plain-language explanation for each stock.
 
 ## Main findings
 
-Backtest from 31 Dec 2018 to 30 Oct 2026: 10 stocks, quarterly rebalancing, 0.1 % transaction costs, maximum 20 % per stock.
+**Recommendation and backtest.** Backtest from 31 Dec 2018 to 30 Oct 2026: 10 stocks, quarterly rebalancing, 0.1 % transaction costs, maximum 20 % per stock.
 
 | | Annualised return | Volatility | Sharpe | Max drawdown | Turnover per rebalance |
 |---|---|---|---|---|---|
@@ -47,20 +49,24 @@ Backtest from 31 Dec 2018 to 30 Oct 2026: 10 stocks, quarterly rebalancing, 0.1 
 | S&P 500 | +14.8 % | 19.0 % | 0.78 | −33.9 % | |
 | CAC 40 | +6.7 % | 18.4 % | 0.36 | −38.6 % | |
 
-What the results do and do not show:
-
 - **The profiles differ as intended on risk and return**: volatility rises from 13.7 % to 20.2 % and return from 10.0 % to 15.9 % as the profile gets bolder.
 - **No profile beats the equal-weight portfolio of the whole universe**, either on return or on Sharpe ratio. In this test, the scoring does not add value over simple diversification.
 - **The prudent profile reduces volatility but not the worst drawdown** (−32.4 % vs −33.8 %): the March 2020 crash hit almost every stock at once.
-- These results cover **one 8-year period** and an **universe affected by survivorship bias**. Differences of a few points in Sharpe ratio or return are within the range of chance, so no conclusion about the scoring's effectiveness should be drawn.
+- These results cover **one 8-year period** and a **universe affected by survivorship bias**. Differences of a few points in Sharpe ratio or return are within the range of chance, so no conclusion about the scoring's effectiveness should be drawn.
 - The four metrics at the top of the app are measured on the same 3-year window used to pick the stocks, so they are **in-sample and optimistic** (Sharpe ratios of about 2 to 3). The **Backtest** tab is the honest evaluation.
+
+**Volatility forecasting** (details [below](#volatility-forecasting)).
+
+- A HAR model extended with a few price-based variables cuts the forecast error of next-month volatility by about 15 % compared with a naive "same as last month" forecast, and beats it in each of the 7 test years (2020 to 2026).
+- A gradient boosting model did **not** beat the linear HAR models and was unstable (in 2022 its error was 38 % higher than the naive forecast).
+- Picking the 10 stocks with the lowest forecast volatility gives next-month volatility of about 19 %, against 28.7 % for the whole universe. But **simple rules do as well as sophisticated models** (a one-year average of past volatility: 18.6 %; the best HAR: 18.9 %), because calm stocks tend to stay calm.
 
 ## How it works
 
 ```
 Yahoo Finance → SQLite → indicators → scoring + clustering → portfolio → backtest
-                                                   ↓
-                                              Streamlit app
+                                                   ↓                       
+                                              Streamlit app        volatility forecasting
 ```
 
 ### 1. Indicators (`src/indicateurs.py`)
@@ -71,10 +77,10 @@ Computed on the last 3 years (756 trading days) from adjusted closing prices; st
 |---|---|
 | Annualised return | Compound growth rate, 252 trading days per year |
 | Annualised volatility | Standard deviation of daily returns × √252 |
-| Sharpe ratio | Annualised return ÷ annualised volatility (risk-free rate assumed 0 %) |
+| Sharpe ratio | Annualised return ÷ annualised volatility (risk-free rate assumed 0 %) [^sharpe] |
 | Beta | Covariance with the local index ÷ variance of the index (CAC 40 for Paris and Amsterdam tickers, S&P 500 otherwise) |
 | Max drawdown | Worst fall from a previous peak |
-| Momentum | Performance over 6 and 12 months |
+| Momentum | Performance over 6 and 12 months [^momentum] |
 
 Every function takes prices only and can be cut at any date, which is what guarantees the backtest uses no future information.
 
@@ -99,9 +105,9 @@ Every function takes prices only and can be cut at any date, which is what guara
 
 ### 3. Portfolio (`src/portefeuille.py`)
 
-Three weighting methods: equal weight, **minimum variance** (default for the prudent profile) and **maximum Sharpe** (default for the balanced and dynamic profiles). Constraints: no short selling, weights sum to 100 %, maximum 20 % per stock by default.
+Three weighting methods: equal weight, **minimum variance** (default for the prudent profile) and **maximum Sharpe** (default for the balanced and dynamic profiles) [^markowitz]. Constraints: no short selling, weights sum to 100 %, maximum 20 % per stock by default.
 
-Because Markowitz optimisation is fragile, two safeguards are used: the covariance matrix is estimated with **Ledoit-Wolf shrinkage**, and expected returns are shrunk 50 % towards their average so that one lucky past performance cannot dominate the portfolio.
+Because Markowitz optimisation is fragile, two safeguards are used: the covariance matrix is estimated with **Ledoit-Wolf shrinkage** [^ledoit], and expected returns are shrunk 50 % towards their average so that one lucky past performance cannot dominate the portfolio.
 
 ### 4. App (`app.py`)
 
@@ -121,6 +127,93 @@ Benchmarks use the same rules and costs: an equal-weight portfolio of the whole 
 - **No look-ahead**: an automated test multiplies the prices of several stocks by 5 *after* a given date and checks that the backtest curve up to that date is unchanged.
 - **Fundamentals (P/E, dividend) are excluded from the backtest**, since the data source only provides today's values; using them would leak future information.
 - Costs paid by the strategies are 0.2 % to 0.4 % of capital per year, depending on turnover.
+
+## Volatility forecasting
+
+*Module: `src/prediction.py`. Run with `python -m src.prediction`.*
+
+### Why volatility, and why these papers
+
+Volatility is persistent: calm periods tend to follow calm periods and turbulent ones follow turbulent ones. It is therefore far more forecastable than returns. The module follows three papers:
+
+- **Corsi (2009)** proposes the **HAR model** (Heterogeneous Autoregressive model): future volatility is explained by past volatility measured over several horizons (day, week, month). It is simple, interpretable and a standard benchmark.
+- **Christensen, Siggaard and Veliyev (2022)** compare HAR models with machine-learning methods (regularisation, trees, neural networks) on the constituents of the Dow Jones. They report that machine learning is competitive and beats the HAR family, even when the only predictors are daily, weekly and monthly lags.
+- **Gu, Kelly and Xiu (2020)** apply machine learning to stock *return* prediction, on about 30,000 US stocks over 60 years. They find trees and neural networks perform best, and that the dominant predictive signals include momentum, liquidity and volatility. This project does **not** attempt return forecasting, which would require far more data; the paper serves as a methodological reference for strict out-of-sample evaluation.
+
+### Setup
+
+- **Target**: the logarithm of the annualised volatility over the **next 21 trading days**, per stock and per month, so that targets do not overlap.
+- **Features** (all computed with prices up to the forecast date): log volatility over 5, 21, 63 and 252 days, log market volatility (average over the universe), returns over 21 and 63 days, and drawdown over 63 days.
+- **Models**:
+
+| Model | Description |
+|---|---|
+| Naive | Last month's volatility |
+| 1-year average | Volatility over the last 252 days |
+| HAR | Linear regression on the 5, 21 and 63-day volatilities (Corsi) |
+| Extended HAR | Linear regression on all features |
+| Gradient boosting | Same features, non-linear (scikit-learn `HistGradientBoostingRegressor`, depth 3, 200 iterations, fixed hyperparameters) |
+
+- **Evaluation**: expanding-window walk-forward validation. Models are retrained each year on all past data, then tested on the following year (2020 to 2026). Observations whose forecast period ends after the test start are **purged** from training. Automated tests check that no future information reaches the features and that the purge works.
+- **Metrics**: RMSE and MAE on log volatility; out-of-sample R² relative to the naive forecast (1 − squared error of the model ÷ squared error of the naive; positive means better than naive); and QLIKE, a loss function recommended for volatility forecasting with noisy volatility proxies [^patton].
+
+### Results
+
+**1. Out-of-sample accuracy, 2020 to 2026** (log volatility; lower RMSE, MAE and QLIKE are better)
+
+| Model | RMSE | MAE | R² vs naive | QLIKE |
+|---|---|---|---|---|
+| Naive (last month) | 0.425 | 0.332 | 0.000 | 0.488 |
+| 1-year average | 0.421 | 0.328 | 0.021 | 0.510 |
+| HAR (Corsi, 2009) | 0.368 | 0.278 | 0.250 | 0.444 |
+| **Extended HAR (linear)** | **0.362** | **0.275** | **0.274** | **0.428** |
+| Gradient boosting | 0.409 | 0.311 | 0.076 | 0.493 |
+
+**2. Ratio of each model's RMSE to the naive model's RMSE, by test year** (below 1 means better than naive)
+
+| Year | 1-year average | HAR | Extended HAR | Gradient boosting |
+|---|---|---|---|---|
+| 2020 | 1.139 | 0.926 | 0.910 | 0.993 |
+| 2021 | 1.225 | 0.843 | 0.871 | 0.971 |
+| 2022 | 0.906 | 0.880 | 0.887 | **1.380** |
+| 2023 | 1.006 | 0.849 | 0.821 | 0.838 |
+| 2024 | 0.735 | 0.788 | 0.765 | 0.764 |
+| 2025 | 0.892 | 0.862 | 0.838 | 0.830 |
+| 2026 | 0.790 | 0.850 | 0.816 | 0.885 |
+
+**3. Stock selection experiment.** At each test date, each model picks the 10 stocks with the lowest *forecast* volatility. The table gives their *realised* volatility the following month, averaged over all test dates.
+
+| Selection rule | Realised volatility next month |
+|---|---|
+| Naive (last month) | 19.7 % |
+| 1-year average | 18.6 % |
+| HAR | 19.1 % |
+| Extended HAR | 18.9 % |
+| Gradient boosting | 18.6 % |
+| Random (whole universe) | 28.7 % |
+| Oracle (knows the future) | 15.0 % |
+
+### Interpretation
+
+- **The HAR models robustly beat the naive forecast**: about 13 % lower RMSE for HAR and 15 % for the extended HAR, and a ratio below 1 in every test year. This is consistent with Corsi's finding that combining volatility measured over several horizons helps. One plausible contributor, not tested here, is that averaging over several windows smooths the measurement noise in a single month of daily data.
+- **Gradient boosting did not beat the linear models** and was unstable (2022). This differs from the headline result of Christensen et al., whose data are very different (intraday data, many more observations) and who also use more extensive model comparisons. With roughly 10,000 stock-month observations and untuned hyperparameters, the simpler model won here. No claim is made about whether this is due to sample size or tuning, which were not investigated.
+- **Accuracy and selection quality diverge.** The most accurate models are not the best at picking calm stocks: the 1-year average and gradient boosting select stocks with the lowest realised volatility (18.6 %), while the extended HAR gets 18.9 %. A likely explanation, not tested here, is that HAR mostly improves the forecast of *when* one stock's volatility changes, while selection depends on the *ranking* of stocks, which is dominated by each stock's long-run volatility level.
+- **Most of the benefit of selection is simple persistence.** Every rule, including the naive one, picks stocks with realised volatility about 9 to 10 points below the universe average. Differences between rules (18.6 % to 19.7 %) are much smaller than that gap. Since the scoring engine already uses past volatility, a volatility forecast adds little to it in this setup. It has therefore **not** been integrated into the score.
+
+### Technical limitations
+
+1. **Noisy volatility proxy.** The papers use intraday data to measure realised variance. Here only daily closes are available, so variance is proxied by squared daily returns, which is far noisier. This inflates all errors and may favour models that smooth noise.
+2. **Different setting from the papers.** One-month horizon instead of one day, no daily HAR component (a single squared return is too noisy; weekly, monthly and quarterly components are used instead), and a small universe. Results are not a replication of the papers' numbers.
+3. **Small and dependent sample.** About 10,000 stock-month observations over a 7-year test period that includes the 2020 crash. Observations from different stocks in the same month are strongly correlated (common market shocks), so the effective sample is much smaller than it looks.
+4. **No statistical significance tests.** Differences between models are described but not tested (for instance with a Diebold-Mariano test [^dm] or a block bootstrap). Differences of a few tenths of a percentage point in the selection experiment should not be interpreted.
+5. **Untuned machine learning.** Gradient boosting uses fixed hyperparameters, with no cross-validated tuning. Lasso and neural networks, used in the paper, are not included.
+6. **Annual retraining and fixed hyperparameters.** Models are refitted once per year, not monthly.
+7. **Retransformation bias.** Models forecast log volatility; exponentiating gives a downward-biased estimate of volatility (Jensen's inequality). No correction is applied, which affects QLIKE equally across models but not the ranking by log error.
+8. **Price-based variables only.** No implied volatility (e.g. VIX), fundamentals, earnings dates or news. The market factor is the average volatility of this universe, not an external index.
+9. **Selection experiment measures average single-stock volatility**, not the volatility of a portfolio, so it ignores correlations between the selected stocks and any sector concentration.
+10. **Data issues inherited from the rest of the project**: survivorship bias, forward-filled gaps of up to 5 days (which create zero-return days and slightly lower measured volatility), different market calendars, and a single free data source.
+11. **Not tested in the portfolio.** No evidence is provided that a better volatility forecast improves the backtested portfolios.
+12. **Volatility only.** No return forecasting is attempted.
 
 ## Data quality
 
@@ -142,6 +235,7 @@ Backtests are only as good as their data, and this project found a real error:
 - **Simplified trading**: execution at the closing price of the signal day, proportional costs, no bid-ask spread and no taxes.
 - **Free data**: Yahoo Finance data can contain errors or gaps. A single source is used.
 - **Fundamentals are not point-in-time**, so they are not used in the backtest.
+- See also the [technical limitations of the volatility forecasting](#technical-limitations).
 
 ## Project structure
 
@@ -155,6 +249,7 @@ stock-screener/
 │   ├── scoring.py          Scoring, clustering, filtering, recommendations
 │   ├── portefeuille.py     Portfolio optimisation
 │   ├── backtest.py         Backtest engine and metrics
+│   ├── prediction.py       Volatility forecasting (HAR and machine learning)
 │   ├── diagnostic.py       Detection of abnormal moves
 │   └── snapshot.py         Lightweight copy of the database for deployment
 ├── tests/                  Automated tests (pytest)
@@ -186,6 +281,7 @@ python -m src.indicateurs                    # compute and store indicators
 python -m src.scoring --profil prudent       # ranked, explained recommendations
 python -m src.portefeuille --profil prudent  # portfolio weights
 python -m src.backtest --profil prudent      # backtest (saves CSV and HTML chart in data/)
+python -m src.prediction                     # volatility forecasting experiment
 python -m src.diagnostic --profil prudent --seuil 0.2   # data-quality check
 pytest -v                                    # run the tests
 streamlit run app.py                         # launch the app
@@ -197,11 +293,27 @@ If `data/stock_screener.db` does not exist, the app falls back to the lightweigh
 
 ## Possible next steps
 
-- Forecast **volatility** (the most predictable quantity) with walk-forward validation against a naive "same as last month" baseline.
+- Add statistical tests to the forecasting comparison (Diebold-Mariano, block bootstrap) and tune the machine-learning models with time-aware cross-validation.
+- Improve the volatility proxy with range-based estimators using daily high and low prices.
+- Test whether a volatility forecast improves the backtested portfolios, using the same no-look-ahead framework.
 - Compare each strategy with thousands of **random 10-stock portfolios**, to separate the effect of the scoring from that of diversification.
 - Sensitivity analysis on the observation window, rebalancing frequency and costs, published in full.
 - Currency conversion, point-in-time fundamentals and a more realistic cost model.
 - Continuous integration (tests on every push).
+
+## References
+
+- Christensen, K., Siggaard, M. and Veliyev, B. (2022). A Machine Learning Approach to Volatility Forecasting. *Journal of Financial Econometrics*. https://doi.org/10.1093/jjfinec/nbac020 (working paper: CREATES Research Paper 2021-03, Aarhus University).
+- Corsi, F. (2009). A Simple Approximate Long-Memory Model of Realized Volatility. *Journal of Financial Econometrics*, 7(2), 174–196. https://doi.org/10.1093/jjfinec/nbp001
+- Gu, S., Kelly, B. and Xiu, D. (2020). Empirical Asset Pricing via Machine Learning. *Review of Financial Studies*, 33(5), 2223–2273. https://doi.org/10.1093/rfs/hhaa009
+- Pedregosa, F. et al. (2011). Scikit-learn: Machine Learning in Python. *Journal of Machine Learning Research*, 12, 2825–2830.
+
+[^sharpe]: Sharpe, W. F. (1966). Mutual Fund Performance. *Journal of Business*, 39(1), 119–138.
+[^momentum]: Jegadeesh, N. and Titman, S. (1993). Returns to Buying Winners and Selling Losers: Implications for Stock Market Efficiency. *Journal of Finance*, 48(1), 65–91.
+[^markowitz]: Markowitz, H. (1952). Portfolio Selection. *Journal of Finance*, 7(1), 77–91.
+[^ledoit]: Ledoit, O. and Wolf, M. (2004). A well-conditioned estimator for large-dimensional covariance matrices. *Journal of Multivariate Analysis*, 88(2), 365–411.
+[^patton]: Patton, A. J. (2011). Volatility forecast comparison using imperfect volatility proxies. *Journal of Econometrics*, 160(1), 246–256.
+[^dm]: Diebold, F. X. and Mariano, R. S. (1995). Comparing Predictive Accuracy. *Journal of Business & Economic Statistics*, 13(3), 253–263.
 
 ## Data and licence
 
@@ -211,4 +323,4 @@ Released under the MIT licence.
 
 ## Author
 
-**Bénédicte Carminot**: [LinkedIn](https://www.linkedin.com/in/YOUR-PROFILE) · [GitHub](https://github.com/cd-0707)
+**Bénédicte C**: [LinkedIn](https://www.linkedin.com/in/benedicte-carminot) · [GitHub](https://github.com/cd-0707)
