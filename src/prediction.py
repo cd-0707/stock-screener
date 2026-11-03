@@ -270,12 +270,35 @@ def experience_de_selection(predictions, k=10):
 # Prévision à la date la plus récente
 # ---------------------------------------------------------------------------
 
-def prevoir_volatilite(prix, modele="har"):
-    """Volatilité annualisée prévue pour le mois qui suit la dernière date, par action."""
+def prevoir_volatilite(prix, modele="har", min_observations=50):
+    """Volatilité annualisée prévue pour le mois qui suit la dernière date, par action.
+
+    Le modèle est entraîné uniquement avec les observations dont la période à prévoir
+    est terminée à la dernière date de `prix` : aucune information future n'est utilisée.
+    """
     donnees = construire_jeu_de_donnees(prix)
+    if len(donnees) < min_observations:
+        raise ValueError(f"Pas assez d'observations pour prévoir ({len(donnees)} < {min_observations}).")
     actuel = caracteristiques_actuelles(prix)
+    if actuel.empty:
+        raise ValueError("Aucune action n'a assez d'historique à la dernière date.")
     prevision = _predire(modele, donnees, actuel)
     return pd.Series(np.exp(prevision), index=actuel["ticker"], name="volatilite_prevue")
+
+
+def previsions_aux_dates(prix, dates, modele="har_etendu", min_observations=50):
+    """Prévision de volatilité faite à chaque date, avec les seuls prix jusqu'à cette date.
+
+    Renvoie un dictionnaire {date: Series de volatilités prévues}. Une date sans assez
+    de données est simplement absente du résultat.
+    """
+    resultat = {}
+    for date in dates:
+        try:
+            resultat[date] = prevoir_volatilite(prix.loc[:date], modele, min_observations)
+        except ValueError as erreur:
+            log.warning("Pas de prévision au %s : %s", pd.Timestamp(date).date(), erreur)
+    return resultat
 
 
 # ---------------------------------------------------------------------------

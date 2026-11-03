@@ -10,7 +10,7 @@ import pytest
 from src.prediction import (
     CARACTERISTIQUES_ETENDUES, HORIZON, NOMS_MODELES, construire_jeu_de_donnees,
     experience_de_selection, jeu_d_entrainement, mesurer, mesurer_par_annee,
-    prevoir_volatilite, valider_par_avancement,
+    prevoir_volatilite, previsions_aux_dates, valider_par_avancement,
 )
 
 
@@ -149,4 +149,23 @@ def test_prevoir_volatilite(prix_persistants):
     assert len(previsions) == 20
     assert previsions.between(0.02, 3.0).all()
     assert set(previsions.index) == {f"A{i}" for i in range(20)}
-    
+
+
+def test_pas_de_prevision_sans_assez_de_donnees(prix_persistants):
+    with pytest.raises(ValueError):
+        prevoir_volatilite(prix_persistants.iloc[:300])
+
+
+def test_previsions_aux_dates_nutilisent_que_le_passe(prix_persistants):
+    dates = [prix_persistants.index[1500], prix_persistants.index[2000]]
+    completes = previsions_aux_dates(prix_persistants, dates, modele="har")
+    assert set(completes) == set(dates)
+    for date in dates:
+        tronquees = prevoir_volatilite(prix_persistants.loc[:date], modele="har")
+        assert np.allclose(completes[date], tronquees)
+
+
+def test_dates_sans_assez_de_donnees_sont_ignorees(prix_persistants):
+    dates = [prix_persistants.index[300], prix_persistants.index[2000]]
+    previsions = previsions_aux_dates(prix_persistants, dates, modele="har")
+    assert dates[0] not in previsions and dates[1] in previsions

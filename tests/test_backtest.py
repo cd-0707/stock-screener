@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from src.backtest import dates_de_rebalancement, lancer_backtest, metriques
+from src.prediction import previsions_aux_dates
 
 SECTEURS = ["Technology", "Healthcare", "Energy", "Financial Services"]
 PARAMETRES = dict(profil="equilibre", nb_actions=5, historique_min=300, fenetre=300)
@@ -125,3 +126,37 @@ def test_metriques_dune_courbe_qui_double_en_un_an():
     assert m.loc["X", "Rendement annualisé"] == pytest.approx(1.0)
     assert m.loc["X", "Rendement total"] == pytest.approx(1.0)
     assert m.loc["X", "Drawdown max"] == pytest.approx(0.0)
+
+
+# --- volatilité prévue dans le backtest -------------------------------------
+
+@pytest.fixture(scope="module")
+def dates_reequilibrage(prix):
+    return dates_de_rebalancement(prix.index, "trimestriel", PARAMETRES["historique_min"])
+
+
+def test_la_prevision_change_les_resultats(prix, resultat, dates_reequilibrage):
+    previsions = previsions_aux_dates(prix, dates_reequilibrage, modele="har")
+    assert len(previsions) > 0
+    avec = lancer_backtest(prix, SECTEUR_PAR_TICKER, previsions_volatilite=previsions, **PARAMETRES)
+    assert not np.allclose(avec["courbes"]["Stratégie"], resultat["courbes"]["Stratégie"])
+    assert np.allclose(avec["courbes"]["Équipondéré (tout l'univers)"],
+                       resultat["courbes"]["Équipondéré (tout l'univers)"])
+
+
+def test_un_choc_futur_ne_change_pas_le_passe_avec_les_previsions(prix, dates_reequilibrage):
+    """Même test que ci-dessus, mais en utilisant la volatilité prévue : aucune fuite non plus."""
+    date = prix.index[700]
+    previsions = previsions_aux_dates(prix, dates_reequilibrage, modele="har")
+    normal = lancer_backtest(prix, SECTEUR_PAR_TICKER, previsions_volatilite=previsions, **PARAMETRES)
+
+    prix_choc = prix.copy()
+    prix_choc.loc[prix_choc.index > date, ["S1", "S2", "S3", "S4"]] *= 5
+    previsions_choc = previsions_aux_dates(prix_choc, dates_reequilibrage, modele="har")
+    avec_choc = lancer_backtest(prix_choc, SECTEUR_PAR_TICKER, previsions_volatilite=previsions_choc, **PARAMETRES)
+
+    assert np.allclose(normal["courbes"].loc[:date, "Stratégie"], avec_choc["courbes"].loc[:date, "Stratégie"])
+    anterieures = [d for d in previsions if d <= date]
+    assert len(anterieures) > 0
+    for d in anterieures:
+        assert np.allclose(previsions[d], previsions_choc[d])

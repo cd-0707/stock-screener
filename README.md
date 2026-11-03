@@ -4,11 +4,12 @@ A personalised stock recommendation system: given an investor's profile (risk ap
 
 > ⚠️ **Educational project. This is not investment advice.** Rankings describe past behaviour of a small set of stocks; they do not predict the future and can lose money.
 
-**[Live demo](https://stock-screener-gxdqcb3zs8omhuhqsmjz5c.streamlit.app/)** · Python · pandas · scikit-learn · SQLite · Streamlit
+**[Live demo](https://YOUR-APP-NAME.streamlit.app)** · Python · pandas · scikit-learn · SQLite · Streamlit
 
+<!-- Add 2-3 screenshots to docs/img/ and uncomment:
 ![Portfolio tab](docs/img/portfolio.png)
-![Why these stocks?](docs/img/why.png)
 ![Backtest tab](docs/img/backtest.png)
+-->
 
 ## Contents
 
@@ -60,6 +61,7 @@ A personalised stock recommendation system: given an investor's profile (risk ap
 - A HAR model extended with a few price-based variables cuts the forecast error of next-month volatility by about 15 % compared with a naive "same as last month" forecast, and beats it in each of the 7 test years (2020 to 2026).
 - A gradient boosting model did **not** beat the linear HAR models and was unstable (in 2022 its error was 38 % higher than the naive forecast).
 - Picking the 10 stocks with the lowest forecast volatility gives next-month volatility of about 19 %, against 28.7 % for the whole universe. But **simple rules do as well as sophisticated models** (a one-year average of past volatility: 18.6 %; the best HAR: 18.9 %), because calm stocks tend to stay calm.
+- Using the forecast inside the portfolio score made **no detectable difference**: for the three profiles, all six 90 % bootstrap confidence intervals (differences in return and Sharpe ratio) contain zero. The test has low statistical power, so a small effect cannot be excluded.
 
 ## How it works
 
@@ -198,7 +200,44 @@ Volatility is persistent: calm periods tend to follow calm periods and turbulent
 - **The HAR models robustly beat the naive forecast**: about 13 % lower RMSE for HAR and 15 % for the extended HAR, and a ratio below 1 in every test year. This is consistent with Corsi's finding that combining volatility measured over several horizons helps. One plausible contributor, not tested here, is that averaging over several windows smooths the measurement noise in a single month of daily data.
 - **Gradient boosting did not beat the linear models** and was unstable (2022). This differs from the headline result of Christensen et al., whose data are very different (intraday data, many more observations) and who also use more extensive model comparisons. With roughly 10,000 stock-month observations and untuned hyperparameters, the simpler model won here. No claim is made about whether this is due to sample size or tuning, which were not investigated.
 - **Accuracy and selection quality diverge.** The most accurate models are not the best at picking calm stocks: the 1-year average and gradient boosting select stocks with the lowest realised volatility (18.6 %), while the extended HAR gets 18.9 %. A likely explanation, not tested here, is that HAR mostly improves the forecast of *when* one stock's volatility changes, while selection depends on the *ranking* of stocks, which is dominated by each stock's long-run volatility level.
-- **Most of the benefit of selection is simple persistence.** Every rule, including the naive one, picks stocks with realised volatility about 9 to 10 points below the universe average. Differences between rules (18.6 % to 19.7 %) are much smaller than that gap. Since the scoring engine already uses past volatility, a volatility forecast adds little to it in this setup. It has therefore **not** been integrated into the score.
+- **Most of the benefit of selection is simple persistence.** Every rule, including the naive one, picks stocks with realised volatility about 9 to 10 points below the universe average. Differences between rules (18.6 % to 19.7 %) are much smaller than that gap. Since the scoring engine already uses past volatility, a volatility forecast adds little to it in this setup. It was therefore tested separately inside the portfolio backtest (next subsection) and is **not** part of the default score.
+
+### Does the forecast improve the portfolios?
+
+*Module: `src/experience_prevision.py`. Run with `python -m src.experience_prevision`.*
+
+For each profile, two backtests were run with identical dates, costs and rules. Only the volatility criterion of the score differs: the past 3-year volatility, versus the next-month volatility forecast by the extended HAR model, **retrained at each rebalancing date using only the data available at that date**. An automated test checks that no future information is used: multiplying some prices by 5 after a given date changes neither the forecasts nor the backtest curve before that date.
+
+To judge whether the differences are more than chance, block-bootstrap confidence intervals were computed (21-day blocks, 2,000 resamples, the same days drawn for both versions).
+
+**Backtest performance** (same period and settings as the main backtest)
+
+| Profile | Volatility used | Annualised return | Volatility | Sharpe | Max drawdown |
+|---|---|---|---|---|---|
+| Prudent | Past (3 years) | +10.0 % | 13.7 % | 0.73 | −32.4 % |
+| Prudent | Forecast (HAR) | +9.3 % | 14.0 % | 0.66 | −28.1 % |
+| Balanced | Past (3 years) | +13.5 % | 16.7 % | 0.81 | −36.0 % |
+| Balanced | Forecast (HAR) | +12.7 % | 16.2 % | 0.78 | −28.6 % |
+| Dynamic | Past (3 years) | +15.9 % | 20.2 % | 0.79 | −32.9 % |
+| Dynamic | Forecast (HAR) | +16.0 % | 20.3 % | 0.79 | −32.9 % |
+
+**Difference (forecast minus past) with 90 % bootstrap confidence intervals**
+
+| Profile | Δ return (pts/year) | 90 % CI | Δ Sharpe | 90 % CI | Portfolio overlap |
+|---|---|---|---|---|---|
+| Prudent | −0.60 | [−3.29, +2.12] | −0.06 | [−0.27, +0.13] | 71 % |
+| Balanced | −0.81 | [−3.47, +2.40] | −0.02 | [−0.22, +0.16] | 80 % |
+| Dynamic | +0.12 | [−1.32, +1.57] | 0.00 | [−0.07, +0.07] | 92 % |
+
+*Portfolio overlap is the average share of the portfolio common to both versions at each rebalancing date (100 % means identical portfolios).*
+
+**Interpretation**
+
+- **No detectable effect**: all six confidence intervals contain zero, so the observed differences cannot be distinguished from chance.
+- **The forecast changes the portfolios in proportion to the weight of volatility in the score**: overlap is 92 % for the dynamic profile (volatility weighs 5 %), 80 % for the balanced profile (20 %) and 71 % for the prudent profile (35 %). The changes were not large enough to produce a measurable performance difference.
+- **Absence of evidence is not evidence of absence**: the intervals are wide (about ±2.7 points per year for the prudent profile), so effects of two to three points per year, in either direction, cannot be ruled out. Eight years and 89 stocks do not give enough statistical power to detect small effects.
+- **Maximum drawdown was lower with the forecast** for the prudent (−28.1 % vs −32.4 %) and balanced (−28.6 % vs −36.0 %) profiles. This is only a hypothesis for further work: the maximum drawdown is by construction a single episode, it depends heavily on the few stocks held at that moment, it was not covered by the bootstrap, and it is one of many figures examined.
+- This is consistent with the stock selection experiment above, where simple persistence of volatility explained most of the benefit.
 
 ### Technical limitations
 
@@ -212,7 +251,7 @@ Volatility is persistent: calm periods tend to follow calm periods and turbulent
 8. **Price-based variables only.** No implied volatility (e.g. VIX), fundamentals, earnings dates or news. The market factor is the average volatility of this universe, not an external index.
 9. **Selection experiment measures average single-stock volatility**, not the volatility of a portfolio, so it ignores correlations between the selected stocks and any sector concentration.
 10. **Data issues inherited from the rest of the project**: survivorship bias, forward-filled gaps of up to 5 days (which create zero-return days and slightly lower measured volatility), different market calendars, and a single free data source.
-11. **Not tested in the portfolio.** No evidence is provided that a better volatility forecast improves the backtested portfolios.
+11. **Low statistical power of the portfolio test.** The test of the forecast inside the backtest uses one 8-year period, 89 stocks and a block bootstrap that assumes 21-day blocks are roughly independent. Its confidence intervals are wide, so only large effects could be detected. The HAR specification was also chosen on the same period (see the accuracy results), which can slightly favour the forecast version. Six intervals were examined at the 90 % level, so isolated apparent successes would be expected by chance.
 12. **Volatility only.** No return forecasting is attempted.
 
 ## Data quality
@@ -250,6 +289,7 @@ stock-screener/
 │   ├── portefeuille.py     Portfolio optimisation
 │   ├── backtest.py         Backtest engine and metrics
 │   ├── prediction.py       Volatility forecasting (HAR and machine learning)
+│   ├── experience_prevision.py  Test of the forecast inside the backtest (bootstrap)
 │   ├── diagnostic.py       Detection of abnormal moves
 │   └── snapshot.py         Lightweight copy of the database for deployment
 ├── tests/                  Automated tests (pytest)
@@ -282,6 +322,7 @@ python -m src.scoring --profil prudent       # ranked, explained recommendations
 python -m src.portefeuille --profil prudent  # portfolio weights
 python -m src.backtest --profil prudent      # backtest (saves CSV and HTML chart in data/)
 python -m src.prediction                     # volatility forecasting experiment
+python -m src.experience_prevision           # does the forecast improve the portfolios?
 python -m src.diagnostic --profil prudent --seuil 0.2   # data-quality check
 pytest -v                                    # run the tests
 streamlit run app.py                         # launch the app
@@ -295,7 +336,8 @@ If `data/stock_screener.db` does not exist, the app falls back to the lightweigh
 
 - Add statistical tests to the forecasting comparison (Diebold-Mariano, block bootstrap) and tune the machine-learning models with time-aware cross-validation.
 - Improve the volatility proxy with range-based estimators using daily high and low prices.
-- Test whether a volatility forecast improves the backtested portfolios, using the same no-look-ahead framework.
+- Repeat the portfolio test with a longer history or a larger universe, which would give it enough statistical power to detect a small effect.
+- Investigate the lower maximum drawdown observed with the volatility forecast (which episode, which stocks) before drawing any conclusion.
 - Compare each strategy with thousands of **random 10-stock portfolios**, to separate the effect of the scoring from that of diversification.
 - Sensitivity analysis on the observation window, rebalancing frequency and costs, published in full.
 - Currency conversion, point-in-time fundamentals and a more realistic cost model.
@@ -323,4 +365,4 @@ Released under the MIT licence.
 
 ## Author
 
-**Bénédicte C**: [LinkedIn](https://www.linkedin.com/in/benedicte-carminot) · [GitHub](https://github.com/cd-0707)
+**YOUR NAME**: [LinkedIn](https://www.linkedin.com/in/YOUR-PROFILE) · [GitHub](https://github.com/cd-0707)

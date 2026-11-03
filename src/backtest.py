@@ -125,11 +125,15 @@ def metriques(courbes):
 def lancer_backtest(prix, secteurs, profil, horizon="moyen", nb_actions=10, max_par_secteur=None,
                     poids_max=POIDS_MAX_DEFAUT, methode=None, frais=FRAIS_DEFAUT,
                     frequence="trimestriel", historique_min=HISTORIQUE_MIN,
-                    fenetre=FENETRE_DEFAUT):
+                    fenetre=FENETRE_DEFAUT, previsions_volatilite=None):
     """Backtest complet d'un profil, comparé à un portefeuille équipondéré et aux indices.
 
     prix     : DataFrame (dates x tickers) de clôtures ajustées, avec les indices (voir charger_prix)
     secteurs : Series ticker -> secteur
+    previsions_volatilite : dictionnaire {date de rééquilibrage: Series de volatilités prévues}
+        (voir prediction.previsions_aux_dates). Si fourni, le critère « volatilité » du score
+        utilise la volatilité PRÉVUE à la place de la volatilité passée sur 3 ans. Chaque
+        prévision doit avoir été faite avec les seuls prix disponibles à sa date.
     """
     rendements = prix / prix.shift(1) - 1
     dates = dates_de_rebalancement(prix.index, frequence, historique_min)
@@ -139,6 +143,9 @@ def lancer_backtest(prix, secteurs, profil, horizon="moyen", nb_actions=10, max_
         tableau = _tableau_a_la_date(prix, t, secteurs)
         if len(tableau) < 3:
             return pd.Series(dtype=float)
+        if previsions_volatilite is not None and t in previsions_volatilite:
+            prevue = previsions_volatilite[t].reindex(tableau.index)
+            tableau["volatilite_annuelle"] = prevue.fillna(tableau["volatilite_annuelle"])
         poids, _ = construire_portefeuille(
             tableau, rendements.loc[:t].tail(fenetre), profil, horizon=horizon,
             nb_actions=nb_actions, max_par_secteur=max_par_secteur, poids_max=poids_max,
