@@ -29,7 +29,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
-from src.collecte import CHEMIN_BASE, RACINE
+from src.collecte import CHEMIN_BASE, RACINE, SUFFIXE_BASE
 from src.indicateurs import (
     FENETRE_DEFAUT, MIN_OBS, calculer_indicateurs, charger_prix, drawdown_max,
     ratio_sharpe, rendement_annualise, volatilite_annualisee,
@@ -59,9 +59,19 @@ def dates_de_rebalancement(index, frequence="trimestriel", historique_min=HISTOR
     return pd.DatetimeIndex(dates)
 
 
-def _tableau_a_la_date(prix, date, secteurs):
+def _membres(tickers, eligibilite, date):
+    """Tickers autorisés à la date : sans date d'entrée connue, ou déjà entrés dans l'indice."""
+    tickers = pd.Index(tickers)
+    if eligibilite is None:
+        return tickers
+    debut = eligibilite.reindex(tickers)
+    return tickers[(debut.isna() | (debut <= pd.Timestamp(date))).to_numpy()]
+
+
+def _tableau_a_la_date(prix, date, secteurs, eligibilite=None):
     """Indicateurs tels qu'ils auraient été calculés à `date`, avec les seules données passées."""
     tableau = calculer_indicateurs(prix, date=date)
+    tableau = tableau.loc[_membres(tableau.index, eligibilite, date)]
     derniers = prix.loc[:date].iloc[-1]
     tableau = tableau[derniers.reindex(tableau.index).notna()]   # écarte les valeurs sans cours à cette date
     tableau["secteur"] = secteurs.reindex(tableau.index)
@@ -125,7 +135,7 @@ def metriques(courbes):
 def lancer_backtest(prix, secteurs, profil, horizon="moyen", nb_actions=10, max_par_secteur=None,
                     poids_max=POIDS_MAX_DEFAUT, methode=None, frais=FRAIS_DEFAUT,
                     frequence="trimestriel", historique_min=HISTORIQUE_MIN,
-                    fenetre=FENETRE_DEFAUT, previsions_volatilite=None):
+                    fenetre=FENETRE_DEFAUT, previsions_volatilite=None, eligibilite=None):
     """Backtest complet d'un profil, comparé à un portefeuille équipondéré et aux indices.
 
     prix     : DataFrame (dates x tickers) de clôtures ajustées, avec les indices (voir charger_prix)
@@ -134,13 +144,17 @@ def lancer_backtest(prix, secteurs, profil, horizon="moyen", nb_actions=10, max_
         (voir prediction.previsions_aux_dates). Si fourni, le critère « volatilité » du score
         utilise la volatilité PRÉVUE à la place de la volatilité passée sur 3 ans. Chaque
         prévision doit avoir été faite avec les seuls prix disponibles à sa date.
+    eligibilite : Series ticker -> date d'entrée dans l'indice (voir univers_sp500.eligibilite).
+        Si fournie, une action n'est utilisable qu'à partir de cette date (réduit le biais
+        qui consiste à choisir des actions entrées dans l'indice APRÈS leur succès). Les
+        tickers absents de la Series sont toujours autorisés.
     """
     rendements = prix / prix.shift(1) - 1
     dates = dates_de_rebalancement(prix.index, frequence, historique_min)
     actions = [c for c in prix.columns if c not in INDICES]
 
     def cible_strategie(t):
-        tableau = _tableau_a_la_date(prix, t, secteurs)
+        tableau = _tableau_a_la_date(prix, t, secteurs, eligibilite)
         if len(tableau) < 3:
             return pd.Series(dtype=float)
         if previsions_volatilite is not None and t in previsions_volatilite:
@@ -156,6 +170,7 @@ def lancer_backtest(prix, secteurs, profil, horizon="moyen", nb_actions=10, max_
     def cible_equipondere(t):
         fenetre_prix = prix.loc[:t, actions].tail(fenetre + 1)
         eligibles = fenetre_prix.columns[(fenetre_prix.notna().sum() > MIN_OBS) & fenetre_prix.iloc[-1].notna()]
+        eligibles = _membres(eligibles, eligibilite, t)
         return pd.Series(1.0 / len(eligibles), index=eligibles) if len(eligibles) else pd.Series(dtype=float)
 
     log.info("Backtest « %s » : %d rééquilibrages du %s au %s",
@@ -188,6 +203,8 @@ if __name__ == "__main__":
     parser.add_argument("--poids-max", type=float, default=POIDS_MAX_DEFAUT)
     parser.add_argument("--frais", type=float, default=FRAIS_DEFAUT, help="par défaut 0.001 (0,1 %%)")
     parser.add_argument("--frequence", default="trimestriel", choices=list(MOIS_PAR_FREQUENCE))
+    parser.add_argument("--appartenance", action="store_true",
+                        help="n'autorise une action du S&P 500 qu'à partir de sa date d'entrée dans l'indice")
     args = parser.parse_args()
 
     conn = sqlite3.connect(CHEMIN_BASE)
@@ -195,10 +212,15 @@ if __name__ == "__main__":
     secteurs = pd.read_sql_query("SELECT ticker, secteur FROM actions", conn).set_index("ticker")["secteur"]
     conn.close()
 
+    eligibilite = None
+    if args.appartenance:
+        from src.sp_500 import eligibilite as charger_eligibilite
+        eligibilite = charger_eligibilite()
+
     resultat = lancer_backtest(
         prix, secteurs, args.profil, horizon=args.horizon, nb_actions=args.nb,
         max_par_secteur=args.max_par_secteur, poids_max=args.poids_max,
-        frais=args.frais, frequence=args.frequence,
+        frais=args.frais, frequence=args.frequence, eligibilite=eligibilite,
     )
 
     tableau = resultat["metriques"].copy()
@@ -216,7 +238,7 @@ if __name__ == "__main__":
           f"{rotation_moyenne * args.frais * 12 / {'mensuel': 1, 'trimestriel': 3, 'semestriel': 6, 'annuel': 12}[args.frequence]:.2%}")
 
     dossier = RACINE / "data"
-    prefixe = dossier / f"backtest_{args.profil}"
+    prefixe = dossier / f"backtest_{args.profil}{SUFFIXE_BASE}{'_appartenance' if args.appartenance else ''}"
     resultat["courbes"].to_csv(f"{prefixe}_courbes.csv")
     resultat["compositions"].to_csv(f"{prefixe}_compositions.csv")
     try:

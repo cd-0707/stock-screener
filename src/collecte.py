@@ -22,6 +22,7 @@ Choix de conception :
 import argparse
 import logging
 import math
+import os
 import sqlite3
 import time
 from datetime import datetime
@@ -30,10 +31,18 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-from src.univers import ACTIONS, DEBUT_VALIDE, INDICES
+from src.univers import ACTIONS, CAC40, DEBUT_VALIDE, INDICES
 
 RACINE = Path(__file__).resolve().parent.parent
-CHEMIN_BASE = RACINE / "data" / "stock_screener.db"
+# La variable d'environnement STOCK_SCREENER_DB permet d'utiliser une autre base (par exemple
+# pour un univers élargi) sans toucher à celle de l'application. PowerShell :
+#   $env:STOCK_SCREENER_DB = "data/stock_screener_sp500.db"
+_base_perso = os.environ.get("STOCK_SCREENER_DB")
+CHEMIN_BASE = (RACINE / _base_perso).resolve() if _base_perso else RACINE / "data" / "stock_screener.db"
+
+# Suffixe ajouté aux fichiers de résultats quand on n'utilise pas la base par défaut,
+# pour ne jamais écraser les fichiers lus par l'application.
+SUFFIXE_BASE = "" if CHEMIN_BASE.name == "stock_screener.db" else "_" + CHEMIN_BASE.stem.removeprefix("stock_screener_")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -207,10 +216,11 @@ def enregistrer_fondamentaux(conn, ticker, infos):
 # Programme principal
 # ---------------------------------------------------------------------------
 
-def mettre_a_jour(annees=10, pause=0.5):
-    """Télécharge et enregistre prix et fondamentaux pour tout l'univers."""
+def mettre_a_jour(annees=10, pause=0.5, actions=None):
+    """Télécharge et enregistre prix et fondamentaux pour tout l'univers (ou la liste `actions`)."""
     conn = connecter()
-    univers = [(t, True) for t in INDICES] + [(t, False) for t in ACTIONS]
+    liste = ACTIONS if actions is None else actions
+    univers = [(t, True) for t in INDICES] + [(t, False) for t in liste]
     echecs, sans_fondamentaux = [], []
 
     for i, (ticker, est_indice) in enumerate(univers, start=1):
@@ -308,9 +318,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Collecte des données de marché.")
     parser.add_argument("--annees", type=int, default=10, help="profondeur d'historique (défaut : 10)")
     parser.add_argument("--verifier", action="store_true", help="contrôle la base sans télécharger")
+    parser.add_argument("--univers", choices=["defaut", "sp500"], default="defaut",
+                        help="sp500 : CAC 40 + tout le S&P 500 (lance d'abord python -m src.univers_sp500)")
     args = parser.parse_args()
 
     if args.verifier:
         verifier()
     else:
-        mettre_a_jour(annees=args.annees)
+        liste = None
+        if args.univers == "sp500":
+            from src.sp_500 import tickers_sp500
+            try:
+                liste = sorted(set(CAC40) | set(tickers_sp500()))
+            except FileNotFoundError as erreur:
+                raise SystemExit(str(erreur))
+            log.info("Univers élargi : %d actions. Base utilisée : %s", len(liste), CHEMIN_BASE)
+        mettre_a_jour(annees=args.annees, actions=liste)

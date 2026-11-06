@@ -160,3 +160,24 @@ def test_un_choc_futur_ne_change_pas_le_passe_avec_les_previsions(prix, dates_re
     assert len(anterieures) > 0
     for d in anterieures:
         assert np.allclose(previsions[d], previsions_choc[d])
+
+
+# --- appartenance à l'indice (réduction du biais de survie) -----------------
+
+def test_une_action_nest_utilisable_qua_partir_de_sa_date_d_entree(prix):
+    entree = prix.index[800]
+    eligibilite = pd.Series({f"S{i}": entree for i in range(6)})
+    avec = lancer_backtest(prix, SECTEUR_PAR_TICKER, eligibilite=eligibilite, **PARAMETRES)
+
+    compositions = avec["compositions"]
+    avant = compositions[compositions.index < entree]
+    interdites = [c for c in compositions.columns if c in eligibilite.index]
+    assert len(avant) > 0
+    assert (avant[interdites] == 0).all().all()
+
+
+def test_les_tickers_absents_de_leligibilite_restent_autorises(prix, resultat):
+    """Une éligibilité qui ne mentionne que des tickers inconnus ne doit rien changer."""
+    inconnue = pd.Series({"ZZZ": prix.index[800]})
+    avec = lancer_backtest(prix, SECTEUR_PAR_TICKER, eligibilite=inconnue, **PARAMETRES)
+    assert np.allclose(avec["courbes"]["Stratégie"], resultat["courbes"]["Stratégie"])
